@@ -1,0 +1,927 @@
+---
+title: "STAT412 - Interim Report"
+author: "Ali Aytuğ Tok - 2502409"
+date: "2025-04-29"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=F}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This project is conducted for investigating the prices of the houses in Melbourne (Australia), 
+according to their attributes. To fulfil this goal, many statistical tools have been utilized such as,
+EDA (Exploratory Data Analysis), imputating missing values and finally developing predictive models to estimate
+prices of the houses. Consequently, the target value of this study is Price.
+
+The data is retrieved from Kaggle.com: https://www.kaggle.com/datasets/ronikmalhotra/melbourne-housing-dataset
+
+
+## Exploratary Data Analysis 
+
+First of all, we should import the data and load libraries that are necessary:
+```{r, echo=FALSE}
+setwd('/Users/aytug/Desktop/academic/')
+house <- read.csv("Melbourne_housing.csv", header=T)
+
+library(tidyverse)
+library(ggplot2)
+library(naniar)
+library(GGally)
+library(scales)
+```
+
+Checking dimension of the data if the importing procedure occured successfully:
+```{r}
+if (nrow(house)==dim(house)[1]) {
+  cat("Row numbers are matched.\n")
+} 
+
+if (ncol(house)==dim(house)[2]) {
+  cat("Column numbers are matched.\n")
+}
+```
+
+
+
+Now, it is time for displaying first 10 rows of the data to clarify the structure:
+
+
+```{r}
+head(house,10)
+```
+
+When checking the headers and variables, values follow the same format, logic and relations. It means that, 
+the data fits to the Consistency property. 
+
+For consistency, structure of the data is also should be investigated to see if there is any
+irrelevance:
+
+```{r}
+str(house)
+```
+
+Some of the *chr* variables should be turned into factors because representing categorical aspects. For instance, 
+*Suburb* can be a decisive factor for choosing a house. Similarly, *Type* can also be important for the customers.
+The factor transformation procedure can be seen below:
+
+```{r}
+library(lubridate)
+
+house$Suburb <- as.factor(house$Suburb)
+house$Type <- as.factor(house$Type)
+house$Method <- as.factor(house$Method)
+house$SellerG <- as.factor(house$SellerG)
+house$CouncilArea <- as.factor(house$CouncilArea)
+house$Regionname <- as.factor(house$Regionname)
+house$ParkingArea <- as.factor(house$ParkingArea)
+house$Distance <-  as.numeric(house$Distance)
+house$YearBuilt <- as.integer(house$YearBuilt)
+house$YearBuilt[house$YearBuilt > 2023] <- NA
+house$Propertycount <- as.numeric(house$Propertycount)
+house$Date <- dmy(house$Date)
+house$BuildingArea <- as.numeric(house$BuildingArea)
+house$BuildingArea[is.infinite(house$BuildingArea) | house$BuildingArea == 0] <- NA #for imputation, Inf values are turned into NAs. Also, it is obvious that 0 m2 is impossible for an area of a house. Thus, 0s are transformed as NA too.
+```
+
+Now, time to check back the structure for the latest version of the dataset:
+```{r}
+str(house)
+```
+
+
+Summary statistics of the data has been checked to observe the descriptive statistics, such as mean, median, 
+quartiles, minimum and maximum values for each variable. Moreover, the amount of the NA values can be observed as well.
+
+```{r}
+summary(house)
+```
+
+
+***EDA & Visualization***
+
+
+To have the proportion of the NA values, *bind_shadow()* is used. This command leads NA values to be added into the data:
+
+```{r, warning=FALSE}
+house_binded <- house %>% 
+                     bind_shadow() 
+```
+
+```{r}
+str(house_binded)
+```
+
+
+Before starting EDA procedure, the research questions have to be decided. According to these questions, the necessary 
+variables should be selected for the visualization. The questions can be seen as:
+
+**Is there a significant difference in the sale price among different type of the properties?** 
+
+```{r}
+eda1 <- house %>%
+  select(Price, Type, Car) %>%
+  bind_shadow() 
+
+eda1 %>%
+  group_by(Type, Car_NA) %>%
+  summarise(n=n()) %>%
+  mutate(percent = round(n) / sum(n) * 100, 1) #considered percentage to have a proportional overlook to the missingness, rather than quantitative.
+
+```
+
+
+```{r}
+ggplot(eda1, aes(x = Type, y = Price, fill = Car_NA)) +
+  geom_boxplot(position = position_dodge(0.8)) +
+  labs(title = "Price by Property Type and Car Missingness",
+       x = "Property Type", y = "Price") +
+  scale_fill_manual(values = c("!NA" = "skyblue", "Missing" = "salmon")) +
+  theme_minimal()
+```
+
+
+In the plot, the distribution of the *Price* is seen with and without missing values of the *Car*. X-axis denotes the property type of the houses: *house (h)*, *townhouse (t)* and *unit (u)*. Both distributions of the missing and non-missing values can be seen on the plot. Considering non-missing values, there are visible extreme outliers for *house (h)* variable, compared to *townhouse (h)* and *unit (u)*. *t* and *u* variables show tighter distributions with lower medians compared to *h* and less extreme outliers as mentioned. 
+
+For the missingness mechanism, the distribution of *Price* shows that the missing values are not distributed completely random. 
+The potential relationship of the missing values with *Type* can be considered according to the plot. Thus, this scenario brings the MAR (Missing at Random) case. Moreover, because of this reason MNAR (Missing Not at Random) case should be dismissed. 
+
+
+**Does the age of the properties have an impact on housing price?**
+
+```{r, warning=FALSE}
+house %>%
+  mutate(YearBuilt_cat = ifelse(is.na(YearBuilt), "Missing", as.character(YearBuilt))) %>%
+  group_by(YearBuilt_cat) %>%
+  summarise(mean_price = mean(Price, na.rm = TRUE)) %>%
+  ggplot(aes(x = YearBuilt_cat, y = mean_price, fill = YearBuilt_cat == "Missing")) +
+  geom_col(show.legend = TRUE) +
+  scale_x_discrete(
+    breaks = seq(1800, 2025, by=50)
+  ) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Average Price by Year Built (including Missing)",
+       x = "Year Built", y = "Mean Price (AUD)") +
+  scale_fill_manual(values = c("FALSE" = "tomato", "TRUE" = "darkblue")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+This line chart expresses average price of the houses among different construction years. The rightest bar represents the average value of the missing values, which denotes to 1 million AUD. Especially, before 1950, there are extreme observations. They are likely outliers. After 1950, the price level becomes more stable. With necessary imputaions and transformations, the extreme values could be stabled. But without these procedures, the price level seems to decrease within years.
+
+
+
+**Does the relationship between building area and housing price vary depending on the property's distance to the city center in Melbourne?**
+
+
+```{r, warning=FALSE}
+library(ggplot2)
+
+ggplot(house_binded, aes(x = BuildingArea, y = Price, color = Distance_NA)) +
+  geom_point(alpha = 0.6, size = 2) +
+  scale_color_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "red"),
+    labels = c("Not Missing", "Missing"),
+    name = "Distance Missing"
+  ) +
+  scale_x_continuous(limits=c(0,1000)) +
+  labs(
+    title = "Price vs Building Area with Distance Missingness",
+    x = "Building Area (m²)",
+    y = "Price (AUD)"
+  ) +
+  theme_minimal()
+
+```
+
+There are many zero values that may cause bias for landsize. Also, the observations are accumulated on the lower prices. Moreover, there are many outliers that can mislead for interpreting. Thus, after data cleaning, accurate statistical tests can be beneficial for responding this question.
+
+
+
+**Are the counts of bathroom, bedroom and car spaces have an impact on the price?**
+
+```{r, warning=F}
+house %>%
+  select(Price, Bathroom, Bedroom, Car) %>%
+  ggpairs(upper = list(continuous = wrap("cor", size = 4)),
+        lower = list(continuous = wrap("points", alpha = 0.3)),
+        diag = list(continuous = wrap("densityDiag")))
+
+```
+
+
+```{r, warning=FALSE, messaege=FALSE, results='hide'}
+default_num_var <- house %>% select(where(is.numeric))
+
+default_num_var %>%
+  ggpairs(upper = list(continuous = wrap("cor", size = 3)),
+        lower = list(continuous = wrap("points", alpha = 0.3)),
+        diag = list(continuous = wrap("densityDiag")))
+```
+
+As seen from the plot, there are many extreme values. To remove them, determination of outliers is essential. Tukey's IQR is one of the effective ways to perform this task:
+
+```{r}
+numeric_vars <- names(house)[sapply(house, is.numeric)]
+
+remove_outliers_iqr <- function(df, col) {
+  q1 <- quantile(df[[col]], 0.25, na.rm = TRUE)
+  q3 <- quantile(df[[col]], 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  lower <- q1 - 1.5 * iqr
+  upper <- q3 + 1.5 * iqr
+  df[df[[col]] >= lower & df[[col]] <= upper | is.na(df[[col]]), ]
+}
+
+cleaned_house <- house
+for (col in numeric_vars) {
+  cleaned_house <- remove_outliers_iqr(cleaned_house, col)
+}
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+cleaned_house %>% select(where(is.numeric)) %>%
+  ggpairs(upper = list(continuous = wrap("cor", size = 3)),
+        lower = list(continuous = wrap("points", alpha = 0.3)),
+        diag = list(continuous = wrap("densityDiag")))
+```
+
+
+
+**Is there any effect of the count of the rooms, number of car spaces and building area to predict the price?**
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+cleaned_house %>%
+  select(Price, Rooms, Car, BuildingArea) %>%
+  ggpairs(lower = list(continuous = wrap("points", alpha = 0.4, position = position_jitter(width = 0.3, height = 0.3))),
+        upper = list(continuous = wrap("cor", size = 4)),
+        diag = list(continuous = wrap("densityDiag")))
+```
+
+Considering the density plot of the four variables, all of them are right-skewed, indicates that there are many outliers for each variables. Also, these values can be seen from the scatter plots. *Rooms* has the strongest relationship with *Price* among these variables. However, it is still vague for mentioning a strong relationship. Nevertheless, with accurate transformation and imputation processes, more accurate outcome could be received. 
+
+
+
+
+
+## Identifying the Missing Mechanism and Missing Values
+
+
+To check the type of the missing data to apply the accurate imputation technique, we should use *library(naniar)*.
+
+```{r}
+library(naniar)
+library(tidyverse)
+```
+
+
+```{r, warning=FALSE}
+num_data <- cleaned_house %>% 
+  select(where(is.numeric))
+
+mcar_test(num_data)
+```
+
+
+*miss_var_summary()* is used for summarizing the proportion of the missing values in the dataset per variables,
+assists for obtaining patterns among missing values.
+
+```{r}
+miss_var_summary(cleaned_house)
+```
+
+
+
+For a general visualization for the missingness for rows, *gg_miss_case()* would be a appropriate choice.
+
+```{r}
+gg_miss_case(cleaned_house)
+```
+
+
+To understand the missingness mechanism in the data, facetting can be used to identify if there is a clear pattern among missing values:
+
+```{r}
+gg_miss_case(cleaned_house, facet=Type)
+```
+
+
+According to the plot, faceting process with types of the houses shows structural differences among missing variables. 
+Clearly, *house (h)* tends to show a wider range of missingness compared to *townhouse (t)* and *unit (u)*. This incident reveals that the missingness is not completely random, associated with the Type. Consequently, MCAR (Missing Completely at Random) case should be dismissed. Depending on the plot, the missing values seem to be systematically related to an observed variable, MAR (Missing at Random) mechanism is more accurate for this case. As the missingness can be explained by without the dependency of unobserved causes, there is no strong evidence to claim MNAR (Missing Not at Random).
+
+
+
+*gg_miss_var()* can be used for observing the amount of the missing data per variables in the data:
+
+```{r}
+gg_miss_var(cleaned_house)
+```
+
+
+
+Using vis_miss with clustering can structure the data with using the clustering methods 
+and also can assist for observing trends, correlations and the sturcture of the missing data.
+Thus, it can be more easy to decide on accurate data cleaning and imputation techniques.
+
+```{r}
+vis_miss(cleaned_house, cluster=TRUE)
+```
+
+
+According to the plot created with *vis_miss()*, missing values are accumulated in certain areas corresponding to BuildingArea, YearBuilt, Car, Latitude, Landsize. This means the missing values are not located randomly. So, the MCAR case would be eliminated. For the MNAR case, the missing values should also be located in specific regions and be explained by the other variables in the data. For this case, the missingness would rely on only unobserved value itself. However, it is nearly impossible to test the dependency directly. Thus, when the plot is interpreted, the missingness could be explained by MAR more accurately rather than MNAR.
+
+
+
+*gg_miss_upset()* function is useful for observing the relationship of the missing values between variables. It can 
+be more precise to check the patterns of the missing values. In other words, it is used to have an overall pattern of 
+missingness.
+
+```{r}
+gg_miss_upset(cleaned_house)
+```
+
+
+
+***Imputation***
+
+For precise results, the accurate imputation technique has to be applied. Otherwise, the outcomes might be
+biased, the process would be violated. Since the data has MAR mechanism, the imputation technique has to applied according to this case. 
+
+For MAR cases, 
+
+
+
+```{r}
+library(mice)
+```
+
+
+```{r}
+#setting the mice variables as default
+
+init <- mice(cleaned_house, maxit=0, printFlag=FALSE) 
+default_methods <- init$method
+default_predMat <- init$predictorMatrix
+```
+
+
+Since *init* command indicated logged events, the methods should be considered. In other words, both *Address* and *Postcode* are considered unsuitable for imputation. So, both can be removed because of not being used.
+
+```{r}
+default_methods[c("Address", "Postcode")] <- "" 
+```
+
+
+
+
+```{r}
+#method vector is setted as the initial initial point
+meth <- default_methods
+
+#unpredicted variables should set as empty
+meth["Price"] <- ""
+
+#the accurate method would be selected according to the type of the predictor
+for (col in names(cleaned_house)) {
+  if (col == "Price") next
+  
+  if (is.factor(house[[col]])) {
+    if (nlevels(house[[col]]) == 2) {
+      meth[col] <- "logreg"
+    } else {
+      meth[col] <- "polyreg"
+    }
+  } else if (is.numeric(house[[col]])) {
+    meth[col] <- "pmm"
+  }
+}
+
+print(meth)
+```
+
+
+Before performing imputation, we have to detect if there is a multicollinearity problem. For detection, a correlation plot can be drawn.
+
+```{r}
+library(corrplot)
+
+num_data <- cleaned_house %>%
+  select(where(is.numeric))
+
+corrplot(cor(num_data, use="pairwise.complete.obs"), method="color", addCoef.col = "black", number.cex=.7)
+```
+
+The correlation plot indicates that there might be a multicollinearity problem between *Bedroom* and *Rooms*. To see the effect of multicollinearity problem statistically, VIF values can be checked:
+
+```{r}
+library(car)
+
+vif(lm(Price~., data=num_data))
+```
+It can be seen that there are huge values of VIF for *Rooms* and *Bedroom*. With this issue, performing imputation will not be accurate. For the solution, one of these variables can be omitted. However, this variables will be used in modelling. Thus, without omitting them, other methodologies can be applied.
+
+Before performing the imputation, predictor matrix could be arranged as the highly correlated variables would not be used for predict each other:
+
+
+```{r}
+default_predMat["Bedroom","Rooms"] <- 0
+default_predMat["Rooms","Bedroom"] <- 0
+```
+
+
+
+
+
+Since the matrix became singular, inverse form cannot be obtained. Zero varianced and constant variables can be removed to overcome this issue:
+
+```{r}
+num_data <- house[, sapply(house, is.numeric)]
+num_data <- num_data[, colSums(is.na(num_data)) > 0]  #numerics with NA
+
+non_constant <- sapply(num_data, function(x) var(x, na.rm = TRUE) > 0 & !all(is.na(x)))
+num_data <- num_data[, non_constant]
+```
+
+Despite could not be dealt with the singular matrix problem, Random Forest technique would be used for imputation:
+
+```{r, echo=TRUE, results="hide"}
+library(miceRanger)
+
+imputed_data <- miceRanger(num_data, maxIter = 3, seed = 500)
+```
+
+```{r}
+completed_num_house <- completeData(imputed_data)
+completed_num <- completed_num_house$Dataset_1
+summary(completed_num)
+```
+```{r}
+summary(num_data)
+```
+
+
+
+According to the imputation map, stated previously, the other NA values should be imputed. Consequently, other variables are going to be imputed with Polynomial Regression:
+
+```{r}
+cat_vars <- c("Suburb", "Type", "CouncilArea", "Method", "SellerG", "Regionname", "ParkingArea")
+df_cat <- cleaned_house[, cat_vars]
+str(df_cat) #to check if the variables in factor form
+```
+
+```{r}
+init <- mice(df_cat, maxit=0, printFlag=FALSE)
+meth <- init$method
+
+meth[names(df_cat)] <- "polyreg"
+```
+
+```{r}
+imputed_cat <- mice(df_cat, method=meth, m=5, maxit=5, seed=412)
+
+completed_cat <- complete(imputed_cat,1)
+```
+
+
+
+```{r}
+summary(df_cat)
+```
+
+```{r}
+summary(completed_cat)
+```
+
+```{r}
+pre_final_imputed <- cbind(completed_num, completed_cat)
+remaining <- setdiff(names(cleaned_house), names(pre_final_imputed))
+final_imputed <- cbind(pre_final_imputed, cleaned_house[, remaining])
+```
+
+```{r}
+summary(final_imputed)
+```
+
+```{r}
+vis_miss(final_imputed, cluster=TRUE)
+```
+
+
+## Data Manipulation and Feature Engineering 
+
+**Checking for Multicollinearity**
+
+Before imputation, some variables were highly correlated. Drawing the correlation plot with imputated data would be helpful for the detection of the multicollinearity at the first stage:
+
+```{r}
+final_imputed <- as.data.frame(final_imputed)
+num_vars <- final_imputed %>% select(where(is.numeric))
+```
+
+```{r}
+library(corrplot)
+
+corrplot(cor(num_vars, use="pairwise.complete.obs"), method="color", addCoef.col = "black", number.cex=.7)
+```
+
+There are still some variables that are highly correlated with each other, such as *Bedroom* and *Rooms*. To ensure if there is a multicollinearity problem statistically, we can check VIF values of the variables:
+
+```{r}
+fit <- lm(Price~., data = num_vars)
+summary(fit)
+```
+
+```{r}
+vif(fit)
+```
+
+Since there are high values of VIF and the priority is to keep all the variables, the Ridge Regression method can be used. This method could decrease the coefficient of the variables and assist to remove multicollinearity issue.
+
+```{r}
+library(glmnet)
+```
+
+```{r}
+numeric_vars <- names(final_imputed)[sapply(final_imputed, is.numeric) & names(final_imputed) != "Price"]
+X <- as.matrix(final_imputed[, numeric_vars])
+y <- final_imputed$Price
+
+
+set.seed(412)
+ridge_cv <- cv.glmnet(X, y, alpha=0, standardize=TRUE)
+best_lambda <- ridge_cv$lambda.min
+ridge_model <- glmnet(X,y, alpha=0, lambda=best_lambda)
+```
+
+
+Evaluation for lambda and R-squared:
+
+```{r}
+coef(ridge_model)
+```
+```{r}
+y_pred <- predict(ridge_model, newx = X)
+rss <- sum((y - y_pred)^2)
+tss <- sum((y - mean(y))^2)
+rsq <- 1 - rss / tss
+cat("R²:", round(rsq, 4))
+```
+
+Comparing RMSE with default linear model and Ridge model:
+
+```{r}
+y_lm_pred <- predict(fit, newdata = num_vars)
+rmse_lm <- sqrt(mean((num_vars$Price - y_lm_pred)^2))
+
+y_ridge_pred <- predict(ridge_model, newx = X)
+rmse_ridge <- sqrt(mean((y - y_ridge_pred)^2))
+```
+
+```{r}
+cat("LM RMSE:    ", round(rmse_lm, 2), "\n")
+cat("Ridge RMSE: ", round(rmse_ridge, 2), "\n")
+```
+
+
+## Confirmatory Data Analysis
+
+Now, it is time to look for statistical insights for raised questions at the beginning of the project with final version of the data:
+
+
+**Is there a significant difference in the sale price among different type of the properties?** 
+
+Visually, drawing box-plot can be helpful for a general insight:
+
+```{r}
+ggplot(final_imputed, aes(x = Type, y = Price, fill = Type)) +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1.5, alpha = 0.7) +
+  labs(title = "Boxplot of Housing Prices by Property Type",
+       x = "Property Type",
+       y = "Price (AUD)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+It seems there is a clear difference for *Price* across different types of properties. To ensure statistically, various tests should be applied. However, there are assumptions to be checked.
+
+
+Firstly, normality should be checked:
+
+```{r}
+hist(final_imputed$Price, xlab="Price", main="Histogram of Price")
+```
+
+The plot tells that *Price* variable is right-skewed. It violates normality. To ensure, Shapiro-Wilk test is appropriate to check normality.
+
+
+```{r}
+final_imputed %>%
+  group_by(Type) %>%
+  filter(n() >= 3 & n() <= 5000) %>% #lower than 5000 sample is taken due to the function error
+  summarise(p_value = shapiro.test(Price)$p.value,
+            n = n())
+```
+
+Since the p-value is too small, normality is not the case for the price variable. Thus, non-parametric tests should be applied for the violation of the normality. Kruskal-Wallis Test would be valid for this research question:
+
+```{r}
+kruskal.test(final_imputed$Price, final_imputed$Type)
+```
+Since the hypothesis are:
+
+*H₀:* The distributions of the dependent variable are the same among all groups.
+*H₁:* At least one group has a different distribution.
+
+and having a very low p-value, the null hypothesis should be ignored. Thus, it can be claimed that there is a statistically difference between *Price* and different *Type* of the properties.
+
+
+
+**Does the age of the properties have an impact on housing price?**
+
+Normality of *YearBuilt* and *Price* should be checked:
+
+```{r}
+set.seed(412)
+
+shapiro.test(sample(final_imputed$YearBuilt, 5000))
+shapiro.test(sample(final_imputed$Price, 5000))
+```
+Both variables are not distributed normal. Also, since both variables are continuous, Spearmann's correlation test would be appropriate.
+
+```{r}
+cor.test(final_imputed$YearBuilt, final_imputed$Price, method = "spearman")
+```
+
+The hypothesis are:
+
+*H₀:* There is no monotic relationship between variables.
+*H₁:* There is a monotic relationship between variables.
+
+Since the p-value is very low, the null hypothesis should be rejected. It can be concluded that there is a monotic relationship between *Price* and *YearBuilt*. The ρ (rho) value is -0.43, means there is an opposite relatonship between *Price* and *YearBuilt*. But the rho value is not close to 1, so the dependence is not too strong. Visually, the relationship can be identified better.
+
+
+```{r}
+library(scales)
+
+final_imputed %>%
+  filter(!is.na(YearBuilt)) %>%
+  group_by(YearBuilt) %>%
+  summarise(mean_price = mean(Price, na.rm = TRUE)) %>%
+  ggplot(aes(x = as.factor(YearBuilt), y = mean_price)) +
+  geom_col(fill = "darkblue") +
+  scale_x_discrete(breaks = seq(1800, 2025, by = 10)) +  # daha sık aralıkla göster
+  scale_y_continuous(labels = comma) +
+  labs(title = "Average Housing Price by Year Built",
+       x = "Year Built", y = "Mean Price (AUD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 8))
+
+```
+
+According to the plot, older houses seem more expensive even with the latest version of the data.
+
+
+
+**Does the relationship between building area and housing price vary depending on the property's distance to the city center in Melbourne?**
+
+
+Since the effect of the 
+
+```{r}
+model1 <- lm(Price ~ BuildingArea*Distance, data=final_imputed)
+summary(model1)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model1)
+```
+
+**Normality**
+
+```{r}
+shapiro.test(sample(final_imputed$Price, 5000))
+shapiro.test(sample(final_imputed$BuildingArea, 5000))
+shapiro.test(sample(final_imputed$Distance, 5000))
+```
+
+Normality assumptions are violated.
+
+
+
+```{r}
+car:: vif(model1)
+```
+Multicollinearity appears.
+
+```{r}
+bptest(model1)
+```
+Variance is not constant.
+
+
+```{r}
+model_robust <- rlm(Price ~ BuildingArea*Distance, data=final_imputed)
+summary(model_robust)
+```
+
+Due to non-constant variance problem, violation of normality and multicollinearity problem, Robust Regression Model is used to interpret the effect of the predictors on dependent (*Price*) variable. 
+
+According to the model, for one unit increase of *Distance*, increases *Price* 17033 units. One unit increase of *BuildingArea* leads *Price* to incerase 9510 units. However, when both cases are considered as an interaction, the effect of *BuildingArea* on *Price* decreases when the *Distance* increases.
+
+
+
+**Are the counts of bathroom, bedroom and car spaces have an impact on the price?**
+
+```{r}
+model4 <- lm(Price ~ Bathroom+Bedroom+Car, final_imputed)
+summary(model4)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(model4)
+```
+
+```{r}
+shapiro.test(sample(resid(model4), 5000))
+```
+
+Normality is violated.
+
+
+```{r}
+bptest(model4)
+```
+Non-constant variance.
+
+```{r}
+car::vif(model4)
+```
+
+No multicollinearity
+
+
+Since some of the assumptions are violated, non-parametric test should be taken into account. Kruskal-Wallis Test is valid for this research question:
+
+```{r}
+p1 <- kruskal.test(Price ~ factor(Bathroom), data = final_imputed)$p.value
+p2 <- kruskal.test(Price ~ factor(Bedroom), data = final_imputed)$p.value
+p3 <- kruskal.test(Price ~ factor(Car), data = final_imputed)$p.value
+```
+
+Since the test is applied for each predictor seperately, interpreting different p-values can be biased. Thus, making a Bonferroni correction would be beneficial for multiple testing:
+
+```{r}
+p.adjust(c(p1,p2,p3), method="bonferroni")
+```
+
+Since the p-values are 0, this incident indicates a robust relationship between predictors and housing price.
+
+
+
+**Is there any effect of the count of the rooms, number of car spaces and building area to predict the price?**
+
+```{r}
+model5 <- lm(Price ~ Rooms + Car + BuildingArea, data = final_imputed)
+summary(model5)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(model5)
+```
+
+```{r}
+shapiro.test(sample(resid(model5), 5000))
+```
+```{r}
+bptest(model5)
+```
+
+```{r}
+car::vif(model5)
+```
+
+
+There are problems for normality and constant variances. However, there is no multicollinearity. To interpret the effects of the predictors, coefficients of a Robust Regression Model can be interpreted:
+
+```{r}
+model_robust2 <- rlm(Price ~ Rooms + Car + BuildingArea, data = final_imputed)
+summary(model_robust2)
+```
+According to the model, for one unit increase for *Rooms* will increase *Price* 72909 units, one unit increase for *Car* leads a decrease on *Price* 32054 units, one unit increase for *BuildingArea* leads 4457 unit increase for the *Price*. It can be concluded that *Rooms* has the biggest impact on *Price* across other predictors for the model.
+
+
+## Cross-Validation 
+
+
+Only the used variables are chosen for previous research questions:
+
+```{r}
+final_imputed1 <- final_imputed %>%
+  select(Price, BuildingArea, Car, Type, Distance, YearBuilt, Landsize, Bathroom, Bedroom, Rooms)
+```
+
+
+```{r}
+library(caret)
+```
+Validation Set Approach
+
+```{r}
+set.seed(412) 
+random_sample = createDataPartition(final_imputed$Price, p = 0.8, list = FALSE)
+
+training_dataset  = final_imputed1[random_sample, ]
+
+testing_dataset = final_imputed1[-random_sample, ]
+```
+
+```{r}
+fit_vsa= lm(Price ~., data = final_imputed1)
+summary(fit_vsa)
+```
+
+
+Repeated K-fold Cross-Validation
+
+```{r}
+set.seed(412)
+
+train_ctrl1 <- trainControl(method = "repeatedcv", number = 10, repeats = 4)
+
+fit_kfold <- train(Price ~ ., data = final_imputed1,
+              method = "lm",
+              trControl = train_ctrl1)
+
+print(fit_kfold)
+
+```
+To reduce the multicollinearity problem, Ridge Regression is used.
+
+
+
+K-fold Cross Validation
+
+```{r}
+set.seed(412) 
+
+
+train_control2 = trainControl(method = "cv",number = 10) 
+
+
+fit_kfcv = train(Price ~., data = final_imputed1, method = "lm", trControl = train_control2)
+
+
+print(fit_kfcv)
+```
+
+Since having the smallest RMSE and R-squared value, picking Repeated K-fold Cross-Validation is the most accurate technique for the dataset.
+
+
+
+## Model Selection
+
+
+Simple Linear Model
+
+```{r}
+model_lm <- lm(Price ~., data = training_dataset)
+summary(model_lm)
+```
+
+```{r}
+# 1. Linearity & Homoscedasticity
+plot(model_lm, which = 1)  # Residuals vs Fitted
+
+# 2. Normality
+plot(model_lm, which = 2)  # Q-Q plot
+shapiro.test(sample(residuals(model_lm), 5000))
+
+# 3. Sabit varyans testi
+library(lmtest)
+bptest(model_lm)
+
+# 4. Multicollinearity
+library(car)
+vif(model_lm)
+```
+
+The assumptions are violated.
+
+
+
+Robust Regression Model
+
+```{r}
+model_rlm <- MASS::rlm(Price~., data=training_dataset)
+summary(model_rlm)
+```
+
+There is no normality or constant variance assumptions for Robust Regression. Since, the dependent variable is continous variable, Logistic Regression cannot be implemented. Linear Regression Model is also cannot be valid due to the assumption violation. Thus, Robust Regression Model is the best model for this dataset.
+
+
+
